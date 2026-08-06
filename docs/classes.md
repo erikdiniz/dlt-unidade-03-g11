@@ -1,89 +1,54 @@
 # Documentação de Classes e Contratos Inteligentes - SPDI
 
-Este documento descreve a modelagem orientada a objetos dos smart contracts da solução **SPDI (Sistema de Prova Digital Imutável)**, detalhando os atributos, visibilidade, assinaturas de métodos e eventos emitidos[cite: 1, 2].
+Este documento descreve a modelagem orientada a objetos dos smart contracts da solução **SPDI (Sistema de Prova Digital Imutável)**, detalhando os atributos, visibilidade, assinaturas de métodos e eventos emitidos.
 
 ---
 
-## 1. Diagrama UML de Classes (Mermaid)
+## 1. Diagrama UML de Classes
 
 ```mermaid
 classDiagram
-    class AccessControl {
-        <<abstract — OpenZeppelin>>
-        +DEFAULT_ADMIN_ROLE bytes32
-        +hasRole(role, conta) bool
-        +grantRole(role, conta)
-        +revokeRole(role, conta)
-    }
-
-    class SPDIRegistry {
-        +REGISTRAR_ROLE bytes32
-        -documentos mapping~bytes32, Documento~
-        -hashParaDocId mapping~bytes32, bytes32~
-        -historico mapping~bytes32, EventoCustodia[]~
-        +registrarDocumento(hash, processoId, tipo) bytes32
-        +retificarDocumento(docId, novoHash)
-        +arquivarDocumento(docId)
-        +verificarHash(hash) Documento
-        +obterDocumento(docId) Documento
-        +obterHistorico(docId) EventoCustodia[]
+    class StatusDocumento {
+        <<enumeration>>
+        PUBLICADO
+        RETIFICADO
+        ARQUIVADO
     }
 
     class Documento {
-        <<struct>>
-        +id bytes32
-        +hashAtual bytes32
-        +processoId string
-        +tipo TipoArtefato
-        +estado EstadoDocumento
-        +remetente address
-        +timestampRegistro uint256
-        +versao uint256
+        +bytes32 hashDocumento
+        +string idProcesso
+        +uint256 timestamp
+        +address registrador
+        +StatusDocumento status
+        +bytes32 hashSubstituto
     }
 
-    class EventoCustodia {
-        <<struct>>
-        +docId bytes32
-        +hash bytes32
-        +acao string
-        +autor address
-        +timestamp uint256
+    class HistoricoRetificacao {
+        +bytes32 hashAntigo
+        +bytes32 hashNovo
+        +string motivo
+        +uint256 timestamp
+        +address autor
     }
 
-    class EstadoDocumento {
-        <<enumeration>>
-        Publicado
-        Retificado
-        Arquivado
+    class SPDI {
+        -mapping~bytes32 => Documento~ _documentos
+        -mapping~bytes32 => HistoricoRetificacao~ _retificacoes
+        +address public owner
+
+        +event DocumentoRegistrado(bytes32 indexed hashDocumento, string idProcesso, address indexed registrador, uint256 timestamp)
+        +event StatusAtualizado(bytes32 indexed hashDocumento, StatusDocumento novoStatus, uint256 timestamp)
+        +event DocumentoRetificado(bytes32 indexed hashAntigo, bytes32 indexed hashNovo, string motivo, address indexed autor)
+
+        +registrarDocumento(bytes32 hashDocumento, string idProcesso) bool
+        +retificarDocumento(bytes32 hashAntigo, bytes32 hashNovo, string motivo) bool
+        +alterarStatus(bytes32 hashDocumento, StatusDocumento novoStatus) bool
+        +verificarDocumento(bytes32 hashDocumento) Documento
+        +obterRetificacao(bytes32 hashNovo) HistoricoRetificacao
+        +existeDocumento(bytes32 hashDocumento) bool
     }
 
-    class TipoArtefato {
-        <<enumeration>>
-        DecisaoJudicial
-        ProvaDigital
-    }
-
-    class Events {
-        <<events>>
-        DocumentoRegistrado(docId, hash, processoId, remetente)
-        DocumentoRetificado(docId, novoHash, remetente)
-        DocumentoArquivado(docId, remetente)
-    }
-
-    AccessControl <|-- SPDIRegistry : herda
-    SPDIRegistry "1" *-- "N" Documento : armazena
-    SPDIRegistry "1" *-- "N" EventoCustodia : histórico append-only
-    SPDIRegistry ..> Events : emite
-    Documento --> EstadoDocumento : estado
-    Documento --> TipoArtefato : tipo
-
-    note for SPDIRegistry "Escrita (registrar, retificar, arquivar):
-somente onlyRole(REGISTRAR_ROLE).
-Leitura (verificar, obter): pública, view.
-Transições ilegais revertem com erro explícito."
-
-    note for EstadoDocumento "Transições legais:
-Publicado → Retificado (repetível)
-Publicado ou Retificado → Arquivado
-Arquivado é terminal.
-Retificar não apaga o histórico."
+    SPDI "1" *-- "*" Documento : armazena
+    SPDI "1" *-- "*" HistoricoRetificacao : registra
+    Documento --> StatusDocumento : possui estado

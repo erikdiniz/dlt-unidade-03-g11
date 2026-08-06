@@ -1,50 +1,57 @@
-# Diagrama de Arquitetura da Solução - SPDI
-
-Este documento especifica a arquitetura de alto e médio nível do **Sistema de Prova Digital Imutável (SPDI)**, detalhando a comunicação entre os componentes e a fronteira entre a infraestrutura Off-Chain e On-Chain.
-
 ```mermaid
 flowchart TB
-    subgraph atores["Atores"]
-        REG["Registrador autenticado<br/>(magistrado, servidor, advogado)"]
-        VER["Verificador público<br/>(pessoa ou sistema)"]
-        AUD["Auditor"]
-    end
+    %% --- ESTILOS ---
+    classDef offchain fill:#f9f9f9,stroke:#333,stroke-width:2px;
+    classDef onchain fill:#e1f5fe,stroke:#0288d1,stroke-width:2px;
+    classDef external fill:#fff3e0,stroke:#f57c00,stroke-width:2px;
 
-    subgraph offchain["OFF-CHAIN"]
-        MOCK["Mock SEI/PJe<br/>simula juntada / assinatura<br/>(API REST)"]
-
-        subgraph frontend["Frontend"]
-            UIPUB["UI pública de verificação<br/>upload do PDF<br/>íntegro / divergente / não encontrado"]
-            DASH["Dashboard de auditoria<br/>histórico + alertas<br/>(autenticado)"]
+    %% --- CAMADA OFF-CHAIN ---
+    subgraph OFFCHAIN_LAYER["CAMADA OFF-CHAIN (Fora da Blockchain)"]
+        
+        subgraph ORIGEM["Sistemas Judiciais de Origem"]
+            PJE["Mock PJe / SEI API<br/>(Assinatura pelo Magistrado)"]:::external
         end
 
-        subgraph backend["Backend API"]
-            HASH["Serviço de hashing<br/>SHA-256 canônico<br/>fonte única de verdade"]
-            SREG["Serviço de registro<br/>(autenticado, escrita)"]
-            SVER["Serviço de verificação<br/>(público, somente leitura)"]
-            CLI["Cliente blockchain<br/>(ethers.js)"]
+        subgraph BACKEND_SPDI["Backend SPDI (Servico de Integridade)"]
+            HASH_ENG["Motor SHA-256<br/>(Gera Hash de 32 bytes)"]:::offchain
+            RELAYER["Provedor Web3 / Relayer<br/>(Assina Transacao com Wallet)"]:::offchain
+            HASH_ENG -->|"Retorna bytes32"| RELAYER
         end
 
-        DB[("Base de auditoria<br/>log de verificações<br/>e alertas de divergência")]
+        subgraph FRONTEND_SPDI["Portal Publico de Verificacao"]
+            UI_APP["Interface Web (React / JS)<br/>(Upload para Conferencia)"]:::offchain
+            CLIENT_HASH["Calculador SHA-256 Client-Side"]:::offchain
+            UI_APP -->|"Le PDF Local"| CLIENT_HASH
+        end
+
     end
 
-    subgraph onchain["ON-CHAIN — nó EVM (Hardhat / testnet)"]
-        SC["Contrato SPDIRegistry<br/>hash + timestamp do bloco<br/>+ id do processo + remetente<br/>+ estado + tipo de artefato"]
+    %% --- CAMADA ON-CHAIN ---
+    subgraph ONCHAIN_LAYER["CAMADA ON-CHAIN (Blockchain)"]
+        
+        subgraph BLOCKCHAIN_NODE["No Blockchain (Testnet / Hardhat)"]
+            SC["Smart Contract SPDI<br/>(SPDI.sol)"]:::onchain
+            
+            subgraph STORAGE["Estado e Armazenamento Imutavel"]
+                DOC_MAP["mapping(bytes32 para Struct Documento)"]:::onchain
+                RET_MAP["mapping(bytes32 para HistoricoRetificacao)"]:::onchain
+                ENUM_STATUS["enum StatusDocumento<br/>(PUBLICADO, RETIFICADO, ARQUIVADO)"]:::onchain
+            end
+            
+            SC --- DOC_MAP
+            SC --- RET_MAP
+            SC --- ENUM_STATUS
+        end
+
     end
 
-    REG -->|"junta prova / assina decisão"| MOCK
-    MOCK -->|"evento de juntada/assinatura<br/>+ arquivo"| SREG
-    SREG -->|"calcula hash<br/>(bytes descartados)"| HASH
-    SREG --> CLI
-    CLI -->|"tx: registrar / retificar / arquivar"| SC
+    %% --- FLUXOS DE COMUNICACAO ---
+    
+    %% Fluxo de Registro
+    PJE -->|"1. POST /api/v1/documentos<br/>(PDF + ID Processo)"| HASH_ENG
+    RELAYER -->|"2. registrarDocumento(hash, idProcesso)<br/>Via HTTPS / JSON-RPC"| SC
 
-    VER -->|"upload do arquivo"| UIPUB
-    UIPUB --> SVER
-    SVER -->|"recomputa o hash"| HASH
-    SVER --> CLI
-    CLI -->|"consulta (view, sem tx)"| SC
-    SVER -->|"registra alerta<br/>se divergente"| DB
-
-    AUD --> DASH
-    DASH -->|"eventos on-chain"| CLI
-    DASH -->|"alertas off-chain"| DB
+    %% Fluxo de Consulta
+    CLIENT_HASH -->|"A. verificarDocumento(hash)<br/>Via JSON-RPC / eth_call"| SC
+    SC -.->|"B. Retorna Struct Documento + Status"| UI_APP
+```
